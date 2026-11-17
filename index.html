@@ -1,29 +1,69 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
-    <style>
-      html,
-      body {
-        height: 100%;
-        margin: 0;
-      }
-      #console {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 20px;
-        font-size: 12px;
-        overflow: auto;
-        box-sizing: border-box;
-        font-family: 'Lucida Console', 'Courier New', 'Menlo';
-        background-color: #131416;
-        color: #c1c2c5;
-      }
-    </style>
-    <script src="src/main.js" defer></script>
-    <title>Wobkot</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Wobkot — a static-site userland for PS4 and PS5 WebKit." />
+    <title>Wobkot — PS4/PS5 Userland</title>
+    <link rel="stylesheet" href="assets/styles.css" />
   </head>
   <body>
-    <pre id="console"></pre>
+    <div class="page">
+      <header class="hero">
+        <span class="badge">STATIC BUILD</span>
+        <h1>Wobkot</h1>
+        <p>Userland for PS4 / PS5 WebKit. Served straight from GitHub Pages — no local host, no certificate setup.</p>
+      </header>
+
+      <main class="grid">
+        <section class="card">
+          <h2><span class="step">1</span> Device</h2>
+          <p class="muted">Open this page in the console's browser. Detection runs automatically.</p>
+          <dl class="device">
+            <div><dt>Console</dt><dd id="device-console">—</dd></div>
+            <div><dt>Firmware</dt><dd id="device-version">—</dd></div>
+            <div><dt>Status</dt><dd id="device-status">Checking…</dd></div>
+          </dl>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">2</span> Payloads</h2>
+          <p class="muted">Add the binary for your console to the site before launching:</p>
+          <ul class="files">
+            <li><code>payloads/ps4/payload.bin</code></li>
+            <li><code>payloads/ps5/kexp.bin</code></li>
+            <li><code>payloads/ps5/elfldr.elf</code></li>
+          </ul>
+          <p class="hint">Only your console's files are required. They are deliberately not committed.</p>
+        </section>
+      </main>
+
+      <section class="card launch">
+        <div>
+          <h2><span class="step">3</span> Launch</h2>
+          <p class="muted" id="launch-note">Press Launch to start the exploit chain.</p>
+        </div>
+        <div class="actions">
+          <button id="launch" class="btn btn-primary" type="button">Launch userland</button>
+          <button id="clear" class="btn" type="button">Clear log</button>
+        </div>
+      </section>
+
+      <section class="terminal">
+        <div class="terminal-bar">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <span>console output</span>
+        </div>
+        <pre id="console" aria-live="polite"></pre>
+      </section>
+
+      <footer>
+        <span>Based on <a href="https://github.com/ufm42/wobkot" target="_blank" rel="noopener">ufm42/wobkot</a> · MIT</span>
+        <span>See README for credits and references.</span>
+      </footer>
+    </div>
+
+    <script src="engine/main.js" defer></script>
+    <script src="assets/app.js" defer></script>
   </body>
 </html>

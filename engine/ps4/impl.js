@@ -64,10 +64,10 @@ function get_syscall(id) {
 
 async function exploit() {
   if (version.major < 12 || (version.major === 12 && version.minor <= 2)) {
-    await load_script('src/lapse.js');
+    await load_script('engine/lapse.js');
   } else {
     throw new Error(`${version} exploit is WIP`);
-    //await load_script('src/lapse.js');
+    //await load_script('engine/lapse.js');
   }
 
   await exploit_main();
@@ -156,7 +156,7 @@ async function post_jailbreak() {
 }
 
 async function load_bin() {
-  const bin_u8 = await load_file('src/ps4/payload.bin');
+  const bin_u8 = await load_file('payloads/ps4/payload.bin');
 
   const size = bin_u8.length.alignUp(PAGE_SIZE);
   const prot = PROT_READ | PROT_WRITE | PROT_EXEC;

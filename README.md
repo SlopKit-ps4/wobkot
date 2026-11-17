@@ -1,38 +1,47 @@
-# wobkot
+# wobkot — static site
 
-Updated userland to use newer JSC bugs.
+A static-site build of [ufm42/wobkot](https://github.com/ufm42/wobkot): a userland for PS4 / PS5 WebKit. The page is plain HTML/CSS/JS — there is no backend, and it is published with GitHub Pages.
 
-# How to use
+Live site: **https://slopkit-ps4.github.io/wobkot/**
 
-- place payloads based on console:
-  - for ps5: `elfldr.elf` and `kexp.bin` in `ps5` folder.
-  - for ps4: `payload.bin` in `ps4` folder.
-- `py host.py`
-- open browser and type `https://{ip}`
+## Layout
 
-# References
+```
+index.html          Landing page, device info, launcher, console panel
+assets/
+  styles.css        Dark responsive theme
+  app.js            UI logic and Launch button
+engine/             Exploit engine (formerly src/)
+  main.js           Loader exposed as window.wobkot.start()
+  worker.js         Web Worker entry point
+  ps4/ ps5/         Per-console implementations
+payloads/
+  ps4/payload.bin   Add before launching on PS4
+  ps5/kexp.bin      Add before launching on PS5
+  ps5/elfldr.elf    Add before launching on PS5
+tools/
+  host.py           Optional local HTTPS server (uses localhost.pem)
+```
 
-- [CSSFontFace-Exploit](https://github.com/ntfargo/CSSFontFace-Exploit)
-- [PS5-Webkit-Execution](https://github.com/ChendoChap/PS5-Webkit-Execution)
-- [psfree-lapse](https://github.com/Al-Azif/psfree-lapse)
-- [vue-after-free](https://github.com/Vuemony/vue-after-free)
-- [PS4-webkit-exploit-6.XX](https://github.com/synacktiv/PS4-webkit-exploit-6.XX)
-- [slopkit](https://github.com/jordyidk/slopkit)
-- [Relapse-Exploit](https://github.com/ntfargo/Relapse-Exploit)
+The engine was kept functionally unchanged; only asset paths were updated for the new layout.
 
-# Credits
+## Payloads
 
-Special thanks to:
+The binary payloads are **not included** in this repository. Add the files for your console to the `payloads/` folders above before pressing Launch. The launcher page shows the exact paths.
 
-- Nathan Fargo [writeup](https://linearfox.com/blog/cssfontface-uaf-playstation)
-- nhk
-- Dr.Yenyen
-- AlAzif
-- ArabPixel
-- synacktiv [writeup](https://www.synacktiv.com/publications/this-is-for-the-pwners-exploiting-a-webkit-0-day-in-playstation-4) 
-- cow
-- idlesauce
-- jordy
-- ChendoChap
-- sonic-iso
-- SISTRo
+## Hosting
+
+The site is served from the `main` branch root via GitHub Pages. Because every path is relative, it works at both `https://<user>.github.io/wobkot/` and a custom domain.
+
+To preview locally:
+
+```sh
+python3 -m http.server 8000
+# open http://localhost:8000
+```
+
+The original `tools/host.py` serves the same files over HTTPS on port 443 with the bundled `localhost.pem`, matching the upstream project's workflow.
+
+## Credits and references
+
+Based on [ufm42/wobkot](https://github.com/ufm42/wobkot), MIT licensed. See [LICENSE.txt](LICENSE.txt) and the upstream README for the full credits and exploit references.

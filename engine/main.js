@@ -70,27 +70,32 @@ async function load_file(src) {
 }
 
 async function main() {
-  await load_script('src/misc.js');
+  await load_script('engine/misc.js');
 
   version.init();
 
   switch (version.console) {
     case 4:
-      await load_script('src/ps4/impl.js');
+      await load_script('engine/ps4/impl.js');
       break;
     case 5:
-      await load_script('src/ps5/impl.js');
+      await load_script('engine/ps5/impl.js');
       break;
     default:
       throw new Error(`Unsupported console ${version.console}`);
   }
 
-  await load_script('src/userland.js');
+  await load_script('engine/userland.js');
   await userland_main();
 
-  await load_script('src/kernel.js');
+  await load_script('engine/kernel.js');
   await kernel_main();
 }
 
 logger.init();
-main();
+
+// The page UI calls this when the user presses Launch.
+window.wobkot = {
+  start: main,
+  logger,
+};

@@ -111,7 +111,7 @@ function process_aio(op, ids, offset = 0, count = ids.length - offset) {
 async function spawn_race_worker(aio_ids_addr, outs_addr) {
   logger.debug('spawn race worker...');
 
-  await load_script('src/thread.js');
+  await load_script('engine/thread.js');
 
   // Prepare worker
   race_worker = new Thread('race_worker');

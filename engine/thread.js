@@ -1,7 +1,7 @@
 //#region Classes
 class Thread extends Worker {
   constructor(name) {
-    super('src/worker.js');
+    super('engine/worker.js');
     if (typeof name !== 'string') {
       throw new Error(`${name} not a valid name !!`);
     }

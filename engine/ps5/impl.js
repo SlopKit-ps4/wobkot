@@ -24,9 +24,9 @@ function get_syscall(id) {
 
 async function exploit() {
   if (version.major < 6) {
-    await load_script('src/lapse.js');
+    await load_script('engine/lapse.js');
   } else {
-    await load_script('src/ps5/relapse.js');
+    await load_script('engine/ps5/relapse.js');
   }
 
   await exploit_main();
@@ -78,8 +78,8 @@ function patch_proc(p, kp) {
 }
 
 async function post_jailbreak() {
-  const kexp_u8 = await load_file('src/ps5/kexp.bin');
-  const elfldr_u8 = await load_file('src/ps5/elfldr.elf');
+  const kexp_u8 = await load_file('payloads/ps5/kexp.bin');
+  const elfldr_u8 = await load_file('payloads/ps5/elfldr.elf');
 
   const kexp_addr = kexp_u8.buffer.data();
   const kexp_page_size = kexp_u8.length.alignUp(PAGE_SIZE);
