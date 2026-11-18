@@ -16,9 +16,9 @@ engine/             Exploit engine (formerly src/)
   worker.js         Web Worker entry point
   ps4/ ps5/         Per-console implementations
 payloads/
-  ps4/payload.bin   Add before launching on PS4
-  ps5/kexp.bin      Add before launching on PS5
-  ps5/elfldr.elf    Add before launching on PS5
+  ps4/payload.bin   GoldHEN for PS4
+  ps5/kexp.bin      Kernel exploit for PS5
+  ps5/elfldr.elf    ELF loader for PS5
 tools/
   host.py           Optional local HTTPS server (uses localhost.pem)
 ```
@@ -27,7 +27,12 @@ The engine was kept functionally unchanged; only asset paths were updated for th
 
 ## Payloads
 
-The binary payloads are **not included** in this repository. Add the files for your console to the `payloads/` folders above before pressing Launch. The launcher page shows the exact paths.
+The binary payloads are included in the repository so GitHub Pages can serve them directly to the launcher:
+
+- **PS4:** `payloads/ps4/payload.bin` (GoldHEN)
+- **PS5:** `payloads/ps5/kexp.bin` and `payloads/ps5/elfldr.elf`
+
+Only your console's files are used. The launcher page shows the exact paths.
 
 ## Hosting
 

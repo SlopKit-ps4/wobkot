@@ -1,5 +1,6 @@
 # PS5 payloads
 
-Place `kexp.bin` and `elfldr.elf` in this folder before launching on PS5.
+- `kexp.bin` — kernel exploit
+- `elfldr.elf` — ELF loader
 
-These files are intentionally gitignored and are not part of the site source.
+Both are served from this site to the PS5 launcher.
