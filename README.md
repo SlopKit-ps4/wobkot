@@ -14,6 +14,7 @@ assets/
 engine/             Exploit engine (formerly src/)
   main.js           Loader exposed as window.wobkot.start()
   worker.js         Web Worker entry point
+  netctrl.js        PS4 13.00 kernel exploit (NetControl UAF)
   ps4/ ps5/         Per-console implementations
 payloads/
   ps4/payload.bin   GoldHEN for PS4
@@ -23,7 +24,7 @@ tools/
   host.py           Optional local HTTPS server (uses localhost.pem)
 ```
 
-The engine was kept functionally unchanged; only asset paths were updated for the new layout.
+The engine was kept functionally unchanged; only asset paths were updated for the new layout, plus one addition: `engine/netctrl.js` ports the NetControl UAF kernel exploit to wobkot's own WebKit/userland entry so PS4 13.00 is supported without bundling any external WebKit chain. The kernel offsets for 13.00 are in `engine/ps4/impl.js`.
 
 ## Payloads
 
