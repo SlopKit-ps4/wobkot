@@ -105,6 +105,8 @@ function patch_proc(p, kp) {
 }
 
 async function post_jailbreak() {
+  logger.info('Applying kernel patch...');
+
   const sysent_661_addr = kernel_base.add(impl.k_sysent_661);
   logger.debug(`sysent_661_addr: ${sysent_661_addr}`);
 
@@ -153,10 +155,14 @@ async function post_jailbreak() {
   kview(sysent_661_addr).setBInt(8, sy_call, true);
   kview(sysent_661_addr).setUint32(0x2c, sy_thrcnt, true);
 
+  logger.info('Kernel patch applied...');
+
   await load_bin();
 }
 
 async function load_bin() {
+  logger.info('Loading payload...');
+
   const bin_u8 = await load_file('payloads/ps4/payload.bin');
 
   const size = bin_u8.length.alignUp(PAGE_SIZE);
@@ -170,6 +176,7 @@ async function load_bin() {
   }
 
   mem.copy(entry_addr, bin_u8.buffer.data(), bin_u8.length);
+  logger.info('Payload memory ready...');
 
   const pthread_addr_addr = mem.alloc(8);
   mem.bset(pthread_addr_addr, 8);

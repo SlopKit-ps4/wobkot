@@ -641,16 +641,27 @@ async function kernel_main() {
   logger.info('===KERNEL===');
 
   await exploit();
+  logger.info('Kernel stage returned...');
 
   find_all_proc();
+  logger.info('Process list found...');
 
-  // Avoid reapplying if already done
-  if (fn.setuid.invoke(0) === -1) {
+  // The 13.00 NetControl exploit leaves the process at uid 1, so the old
+  // setuid(0) probe is not reliable there. Always apply the jailbreak and
+  // kernel patch on 13.00; other firmwares keep the original probe.
+  const is_1300 = version.major === 13 && version.minor === 0;
+  const need_jailbreak = is_1300 || fn.setuid.invoke(0) === -1;
+
+  logger.info(`Jailbreak needed: ${need_jailbreak} !!`);
+
+  if (need_jailbreak) {
     jailbreak();
 
     notify('Jailbroken !!');
 
     await post_jailbreak();
+  } else {
+    logger.info('Jailbreak already active, skipping...');
   }
 
   logger.info('===END===');
