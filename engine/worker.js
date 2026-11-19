@@ -1,6 +1,8 @@
 let marker_arr = new Uint32Array(new ArrayBuffer(0x10));
 
 const transfer = [];
+let suppress_log = false;
+
 const logger = {
   verbose: true, // enable for debug logs
 
@@ -14,6 +16,10 @@ const logger = {
     if (this.verbose) this.log('[*]', `${msg}`);
   },
   log(prefix, msg) {
+    // Every worker re-runs userland_main(); forwarding those logs made the
+    // page repeat the whole userland section once per worker. Errors still
+    // come through the worker's 'err' message channel.
+    if (suppress_log) return;
     self.postMessage({ type: 'log', value: { prefix, msg } });
   },
 };
@@ -58,7 +64,12 @@ const api = {
 
     arw.leak_addr = leak_addr;
 
-    userland_main();
+    suppress_log = true;
+    try {
+      userland_main();
+    } finally {
+      suppress_log = false;
+    }
 
     marker_arr = null;
 
