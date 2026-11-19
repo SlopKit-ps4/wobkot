@@ -80,6 +80,7 @@ body {
   font: 0.78rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-#console:empty {
+#console:empty,
+#console[hidden] {
   display: none;
 }

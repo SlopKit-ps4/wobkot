@@ -10,6 +10,15 @@
   const match = /PlayStation\s+(\d+)[/ ](\d+)\.(\d+)/.exec(navigator.userAgent);
   let ready = false;
 
+  // Reveal the log only when the engine actually writes something to it.
+  if (engine) {
+    const log = engine.logger.log.bind(engine.logger);
+    engine.logger.log = (...args) => {
+      output.hidden = false;
+      return log(...args);
+    };
+  }
+
   if (match) {
     const consoleNum = Number.parseInt(match[1], 10);
     const major = Number.parseInt(match[2], 10);
@@ -34,6 +43,7 @@
 
     button.disabled = true;
     output.textContent = '';
+    output.hidden = false;
     engine.logger.info('Launching...');
 
     Promise.resolve()
