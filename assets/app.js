@@ -5,6 +5,7 @@
   const heading = $('device-title');
   const button = $('jailbreak');
   const output = $('console');
+  const save = $('save-log');
   const engine = window.wobkot;
 
   const match = /PlayStation\s+(\d+)[/ ](\d+)\.(\d+)/.exec(navigator.userAgent);
@@ -15,6 +16,7 @@
     const log = engine.logger.log.bind(engine.logger);
     engine.logger.log = (...args) => {
       output.hidden = false;
+      save.hidden = false;
       return log(...args);
     };
   }
@@ -44,6 +46,7 @@
     button.disabled = true;
     output.textContent = '';
     output.hidden = false;
+    save.hidden = true;
     engine.logger.info('Launching...');
 
     Promise.resolve()
@@ -51,5 +54,18 @@
       .catch((err) => {
         engine.logger.error(err && err.stack ? err.stack : String(err));
       });
+  });
+
+  save.addEventListener('click', () => {
+    const blob = new Blob([output.textContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = `wobkot-log-${Date.now()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   });
 })();
