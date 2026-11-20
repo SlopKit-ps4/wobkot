@@ -2,6 +2,8 @@
 
 Updated userland to use newer JSC bugs.
 
+PS4 13.00 also has a kernel stage (`src/netctrl.js`, a NetControl UAF port) and the matching payload is bundled at `src/ps4/payload.bin`.
+
 # How to use
 
 - place payloads based on console:

