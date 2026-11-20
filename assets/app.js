@@ -6,18 +6,34 @@
   const button = $('jailbreak');
   const output = $('console');
   const save = $('save-log');
+  const status = $('status');
   const engine = window.wobkot;
 
   const match = /PlayStation\s+(\d+)[/ ](\d+)\.(\d+)/.exec(navigator.userAgent);
   let ready = false;
+  let deviceLabel = 'Wobkot';
+
+  function showStatus(text, kind) {
+    status.textContent = text;
+    status.className = kind ? `status ${kind}` : 'status';
+    status.hidden = false;
+    document.title = `${text} — ${deviceLabel}`;
+  }
 
   // Reveal the log only when the engine actually writes something to it.
   if (engine) {
     const log = engine.logger.log.bind(engine.logger);
-    engine.logger.log = (...args) => {
+    engine.logger.log = (prefix, msg) => {
       output.hidden = false;
       save.hidden = false;
-      return log(...args);
+
+      if (prefix === '[-]') {
+        showStatus('FAILED', 'failed');
+      } else if (/Created bin thread with id/.test(String(msg))) {
+        showStatus('JAILBROKEN', 'success');
+      }
+
+      return log(prefix, msg);
     };
   }
 
@@ -30,6 +46,7 @@
       const label = `PS${consoleNum} ${major}.${minor.toString(16).padStart(2, '0')}`;
       heading.textContent = label;
       document.title = label;
+      deviceLabel = label;
       ready = Boolean(engine);
     } else {
       heading.textContent = 'Unsupported device';
@@ -47,11 +64,14 @@
     output.textContent = '';
     output.hidden = false;
     save.hidden = true;
+    status.hidden = true;
+    document.title = deviceLabel;
     engine.logger.info('Launching...');
 
     Promise.resolve()
       .then(() => engine.start())
       .catch((err) => {
+        engine.logger.log('[!]', 'FAILED');
         engine.logger.error(err && err.stack ? err.stack : String(err));
       });
   });
