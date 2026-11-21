@@ -644,8 +644,8 @@ async function kernel_main() {
 
   find_all_proc();
 
-  // NetControl leaves the process at uid 1, so the old setuid(0) probe is not
-  // reliable on 13.00. Always apply the jailbreak/kernel patch there.
+  // The 13.00 Relapse stage does not use setuid(0) as a reliability probe, so
+  // always apply the jailbreak/kernel patch there.
   const is_1300 = version.major === 13 && version.minor === 0;
   if (is_1300 || fn.setuid.invoke(0) === -1) {
     jailbreak();

