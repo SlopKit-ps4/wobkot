@@ -105,11 +105,48 @@ function patch_proc(p, kp) {
 }
 
 async function post_jailbreak() {
+  const shellcode_u8 = Uint8Array.from(atob(impl.k_shellcode), (c) => c.charCodeAt(0));
+
+  // The kpatch blob is a list of c6 81 <rva32> eb records. Refuse to arm the
+  // syscall hook unless every patch site still has the expected jump shape.
+  const patch_sites = [];
+  for (let i = 0; i + 7 < shellcode_u8.length; i++) {
+    if (
+      shellcode_u8[i] !== 0xc6 ||
+      shellcode_u8[i + 1] !== 0x81 ||
+      shellcode_u8[i + 6] !== 0xeb
+    ) {
+      continue;
+    }
+
+    patch_sites.push(
+      (shellcode_u8[i + 2] |
+        (shellcode_u8[i + 3] << 8) |
+        (shellcode_u8[i + 4] << 16) |
+        (shellcode_u8[i + 5] << 24)) >>>
+        0,
+    );
+  }
+  if (patch_sites.length < 4) {
+    throw new Error(`Relapse kpatch has too few sites (${patch_sites.length}) !!`);
+  }
+  logger.info(`Relapse kpatch: ${patch_sites.length} sites !!`);
+
   const sysent_661_addr = kernel_base.add(impl.k_sysent_661);
   logger.debug(`sysent_661_addr: ${sysent_661_addr}`);
 
   const jmp_qword_ptr_rsi_addr = kernel_base.add(impl.k_jmp_qword_ptr_rsi);
   logger.debug(`jmp_qword_ptr_rsi_addr: ${jmp_qword_ptr_rsi_addr}`);
+
+  if ((kview(jmp_qword_ptr_rsi_addr).getUint16(0, true) & 0xffff) !== 0x26ff) {
+    throw new Error('Relapse kpatch gadget is not jmp qword ptr [rsi] !!');
+  }
+  for (const site of patch_sites) {
+    const b = kview(kernel_base.add(site)).getUint8(0, true);
+    if (!((b >= 0x70 && b <= 0x7f) || b === 0xeb)) {
+      throw new Error(`Relapse kpatch site +0x${site.toString(16)} has unexpected byte 0x${b.toString(16)} !!`);
+    }
+  }
 
   const sy_narg = kview(sysent_661_addr).getUint32(0, true);
   const sy_call = kview(sysent_661_addr).getBInt(8, true);
@@ -119,11 +156,9 @@ async function post_jailbreak() {
   logger.debug(`sy_call: ${sy_call}`);
   logger.debug(`sy_thrcnt: ${sy_thrcnt}`);
 
-  kview(sysent_661_addr).setUint32(0, 2, true);
-  kview(sysent_661_addr).setBInt(8, jmp_qword_ptr_rsi_addr, true);
-  kview(sysent_661_addr).setUint32(0x2c, 1, true);
-
-  const shellcode_u8 = Uint8Array.from(atob(impl.k_shellcode), (c) => c.charCodeAt(0));
+  if (sy_narg < 0 || sy_narg > 8 || (sy_call.hi >>> 0) < 0xffff0000) {
+    throw new Error('Relapse sysent entry is not a valid kernel syscall !!');
+  }
 
   const size = shellcode_u8.length.alignUp(PAGE_SIZE);
   const prot = PROT_READ | PROT_WRITE | PROT_EXEC;
@@ -143,15 +178,37 @@ async function post_jailbreak() {
 
   mem.copy(mapping_addr, shellcode_u8.buffer.data(), shellcode_u8.length);
 
-  const ret = fn.kexec.invoke(mapping_addr);
-  logger.debug(`kexec_ret: ${ret}`);
+  let ret;
+  try {
+    kview(sysent_661_addr).setUint32(0, 2, true);
+    kview(sysent_661_addr).setBInt(8, jmp_qword_ptr_rsi_addr, true);
+    kview(sysent_661_addr).setUint32(0x2c, 1, true);
+
+    const armed =
+      kview(sysent_661_addr).getUint32(0, true) === 2 &&
+      kview(sysent_661_addr).getBInt(8, true).eq(jmp_qword_ptr_rsi_addr) &&
+      kview(sysent_661_addr).getUint32(0x2c, true) === 1;
+    if (!armed) {
+      throw new Error('Unable to arm Relapse sysent hook !!');
+    }
+
+    ret = fn.kexec.invoke(mapping_addr);
+    logger.debug(`kexec_ret: ${ret}`);
+  } finally {
+    kview(sysent_661_addr).setUint32(0, sy_narg, true);
+    kview(sysent_661_addr).setBInt(8, sy_call, true);
+    kview(sysent_661_addr).setUint32(0x2c, sy_thrcnt, true);
+  }
+
   if (ret === -1) {
     throw new SyscallError(`Unable to kexec ${mapping_addr} !!`);
   }
 
-  kview(sysent_661_addr).setUint32(0, sy_narg, true);
-  kview(sysent_661_addr).setBInt(8, sy_call, true);
-  kview(sysent_661_addr).setUint32(0x2c, sy_thrcnt, true);
+  for (const site of patch_sites) {
+    if (kview(kernel_base.add(site)).getUint8(0, true) !== 0xeb) {
+      throw new Error(`Relapse kpatch site +0x${site.toString(16)} was not patched !!`);
+    }
+  }
 
   await load_bin();
 }
@@ -914,7 +971,7 @@ const impl_map = {
       wk___imp_pthread_create: 0x3cb9c00,
       k_pthread_create: 0x10110,
       k_shellcode:
-        'uYIAAMAPMkjB4iCJwEgJwkiNikD+//8PIMBIJf///v8PIsC46wQAAL7rBAAAv5Dp//9BuOsAAABmiYHjdhsAuOsEAABBuesAAABBuusAAABmiYFMwS8AQbvrAAAAuJDp//9IgcJxeQQAZomx83YbAGaJuRN3GwBmRImBhHtiAMaBzQoAAOvGgS3UKwDrxoFx1CsA68aB7dQrAOvGgTHVKwDrxoHd1isA68aBjdsrAOvGgV3cKwDrZkSJiW+EYgDHgZAEAAAAAAAAxoHCBAAA62ZEiZG5BAAAZkSJmbUEAADGgUYVOQDrZomBpHEbAMeBWHcbAJDpPAHHgcDYOwBIMcDDxoF6px8AN8aBfacfADfHgYAtEAECAAAASImRiC0QAceBrC0QAQEAAAAPIMBIDQAAAQAPIsAxwMM=',
+        'uYIAAMAPMkjB4iCJwEgJwkiNikD+//8PIMBIJf///v8PIsC46wQAAL7rBAAAv5Dp//9BuOsAAABmiYHjdhsAuOsEAABBuesAAABBuusAAABmiYFMwS8AQbvrAAAAuJDp//9IgcJxeQQAZomx83YbAGaJuRN3GwBmRImBhHtiAMaBzQoAAOvGgS3UKwDrxoFx1CsA68aB7dQrAOvGgTHVKwDrxoHd1isA68aBjdsrAOvGgV3cKwDrZkSJiW+EYgDHgZAEAAAAAAAAxoHCBAAA62ZEiZG5BAAAZkSJmbUEAADGgUYVOQDrZomBpHEbAMeBWHcbAJDpPAHHgcDYOwBIMcDDxoF6px8AN8aBfacfADfHgYAtEAECAAAASImRiC0QAceBrC0QAQEAAAAPIMBIDQAAAQAPIsAPIMBIJf///v8PIsC460gAALoEAAAARTHARTHJvgUAAABmiYGRVRIAuOsGAAC/BQAAAGaJgdNVEgBBugEAAABIuEGDv6AEAAAAQbsBAAAASImB21USALgEAAAAZomB7VUSALhJi///x4HpVRIASYuH0MaB71USAADHgfZVEgBJi7ewZomR+lUSAMaB/FUSAADHgQ5WEgBJi4dAZomxElYSAMaBFFYSAADHgRtWEgBJi7cgZom5H1YSAMaBIVYSAADHgTNWEgBJjb/AZkSJgTdWEgDGgTlWEgAAx4E/VhIASY2/4GZEiYlDVhIAxoFFVhIAAMeBUlYSAEmNvwBmRImRVlYSAMaBWFYSAADHgV5WEgBJjb8gZkSJmWJWEgDGgWRWEgAAZomBb1YSAMaBcVYSAP8PIMBIDQAAAQAPIsAxwMM=',
 
       lk__error: 0x26420,
 

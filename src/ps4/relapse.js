@@ -496,7 +496,7 @@ async function pr_spawn_workers() {
       'register',
       'kinit',
       `(cores) => {
-        importScripts('kernel.js');
+        importScripts('kernel.js?v=' + globalThis.BUILD_ID);
         fn.cpuset_getaffinity = new NativeFunction(487, 'number');
 
         const CPUSET_SZ = 16;

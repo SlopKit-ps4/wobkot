@@ -1,3 +1,5 @@
+globalThis.BUILD_ID = '20261121d';
+
 let marker_arr = new Uint32Array(new ArrayBuffer(0x10));
 
 const transfer = [];
@@ -20,22 +22,22 @@ const logger = {
 
 const api = {
   init() {
-    importScripts('misc.js');
+    importScripts(`misc.js?v=${globalThis.BUILD_ID}`);
 
     version.init();
 
     switch (version.console) {
       case 4:
-        importScripts('ps4/impl.js');
+        importScripts(`ps4/impl.js?v=${globalThis.BUILD_ID}`);
         break;
       case 5:
-        importScripts('ps5/impl.js');
+        importScripts(`ps5/impl.js?v=${globalThis.BUILD_ID}`);
         break;
       default:
         throw new Error(`Unsupported console ${version.console}`);
     }
 
-    importScripts('userland.js');
+    importScripts(`userland.js?v=${globalThis.BUILD_ID}`);
 
     // leaks worker JSC pointers into main thread
     marker_arr.fill(0x41414141); // easier to find in memory

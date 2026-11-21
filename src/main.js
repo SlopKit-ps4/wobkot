@@ -1,3 +1,5 @@
+globalThis.BUILD_ID = '20261121d';
+
 const logger = {
   verbose: true, // enable for debug logs
 
@@ -49,7 +51,7 @@ window.onunhandledrejection = function (event) {
 function load_script(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = src;
+    script.src = src.includes('?') ? `${src}&v=${globalThis.BUILD_ID}` : `${src}?v=${globalThis.BUILD_ID}`;
     script.onload = resolve;
     script.onerror = () => {
       reject(new Error(`Failed to load script: ${src}`));
@@ -59,7 +61,8 @@ function load_script(src) {
 }
 
 async function load_file(src) {
-  const res = await fetch(src);
+  const url = src.includes('?') ? `${src}&v=${globalThis.BUILD_ID}` : `${src}?v=${globalThis.BUILD_ID}`;
+  const res = await fetch(url);
 
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${src}`);

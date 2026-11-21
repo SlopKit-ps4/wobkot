@@ -122,7 +122,7 @@ async function spawn_race_worker(aio_ids_addr, outs_addr) {
     'register',
     'kinit',
     `() => {
-      importScripts('kernel.js');
+      importScripts('kernel.js?v=' + globalThis.BUILD_ID);
 
       pin_to_core(MAIN_CORE);
       set_rtprio(RTP);
