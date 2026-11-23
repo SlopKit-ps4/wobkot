@@ -1,4 +1,4 @@
-globalThis.BUILD_ID = '20261123b';
+globalThis.BUILD_ID = '20261123c';
 
 const logger = {
   verbose: true, // enable for debug logs
