@@ -513,7 +513,7 @@ function fget(fd) {
 }
 
 function fput(fd, fp) {
-  return kview(fdt_ofiles).getBInt(fd * k_filedesc_sizeof, fp, true);
+  return kview(fdt_ofiles).setBInt(fd * k_filedesc_sizeof, fp, true);
 }
 
 function fhold(fp) {

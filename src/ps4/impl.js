@@ -106,31 +106,36 @@ function patch_proc(p, kp) {
 
 async function post_jailbreak() {
   const shellcode_u8 = Uint8Array.from(atob(impl.k_shellcode), (c) => c.charCodeAt(0));
+  const is_relapse = version.major === 13 && version.minor === 0;
 
-  // The kpatch blob is a list of c6 81 <rva32> eb records. Refuse to arm the
-  // syscall hook unless every patch site still has the expected jump shape.
+  // The 13.00 Relapse kpatch blob is a list of c6 81 <rva32> eb records.
+  // Refuse to arm the syscall hook unless every patch site still has the
+  // expected jump shape. Older firmwares use their original patch blobs and
+  // must not be subjected to this 13.00-specific validation.
   const patch_sites = [];
-  for (let i = 0; i + 7 < shellcode_u8.length; i++) {
-    if (
-      shellcode_u8[i] !== 0xc6 ||
-      shellcode_u8[i + 1] !== 0x81 ||
-      shellcode_u8[i + 6] !== 0xeb
-    ) {
-      continue;
-    }
+  if (is_relapse) {
+    for (let i = 0; i + 7 < shellcode_u8.length; i++) {
+      if (
+        shellcode_u8[i] !== 0xc6 ||
+        shellcode_u8[i + 1] !== 0x81 ||
+        shellcode_u8[i + 6] !== 0xeb
+      ) {
+        continue;
+      }
 
-    patch_sites.push(
-      (shellcode_u8[i + 2] |
-        (shellcode_u8[i + 3] << 8) |
-        (shellcode_u8[i + 4] << 16) |
-        (shellcode_u8[i + 5] << 24)) >>>
-        0,
-    );
+      patch_sites.push(
+        (shellcode_u8[i + 2] |
+          (shellcode_u8[i + 3] << 8) |
+          (shellcode_u8[i + 4] << 16) |
+          (shellcode_u8[i + 5] << 24)) >>>
+          0,
+      );
+    }
+    if (patch_sites.length < 4) {
+      throw new Error(`Relapse kpatch has too few sites (${patch_sites.length}) !!`);
+    }
+    logger.info(`Relapse kpatch: ${patch_sites.length} sites !!`);
   }
-  if (patch_sites.length < 4) {
-    throw new Error(`Relapse kpatch has too few sites (${patch_sites.length}) !!`);
-  }
-  logger.info(`Relapse kpatch: ${patch_sites.length} sites !!`);
 
   const sysent_661_addr = kernel_base.add(impl.k_sysent_661);
   logger.debug(`sysent_661_addr: ${sysent_661_addr}`);
@@ -138,13 +143,15 @@ async function post_jailbreak() {
   const jmp_qword_ptr_rsi_addr = kernel_base.add(impl.k_jmp_qword_ptr_rsi);
   logger.debug(`jmp_qword_ptr_rsi_addr: ${jmp_qword_ptr_rsi_addr}`);
 
-  if ((kview(jmp_qword_ptr_rsi_addr).getUint16(0, true) & 0xffff) !== 0x26ff) {
-    throw new Error('Relapse kpatch gadget is not jmp qword ptr [rsi] !!');
-  }
-  for (const site of patch_sites) {
-    const b = kview(kernel_base.add(site)).getUint8(0, true);
-    if (!((b >= 0x70 && b <= 0x7f) || b === 0xeb)) {
-      throw new Error(`Relapse kpatch site +0x${site.toString(16)} has unexpected byte 0x${b.toString(16)} !!`);
+  if (is_relapse) {
+    if ((kview(jmp_qword_ptr_rsi_addr).getUint16(0, true) & 0xffff) !== 0x26ff) {
+      throw new Error('Relapse kpatch gadget is not jmp qword ptr [rsi] !!');
+    }
+    for (const site of patch_sites) {
+      const b = kview(kernel_base.add(site)).getUint8(0, true);
+      if (!((b >= 0x70 && b <= 0x7f) || b === 0xeb)) {
+        throw new Error(`Relapse kpatch site +0x${site.toString(16)} has unexpected byte 0x${b.toString(16)} !!`);
+      }
     }
   }
 
@@ -204,9 +211,11 @@ async function post_jailbreak() {
     throw new SyscallError(`Unable to kexec ${mapping_addr} !!`);
   }
 
-  for (const site of patch_sites) {
-    if (kview(kernel_base.add(site)).getUint8(0, true) !== 0xeb) {
-      throw new Error(`Relapse kpatch site +0x${site.toString(16)} was not patched !!`);
+  if (is_relapse) {
+    for (const site of patch_sites) {
+      if (kview(kernel_base.add(site)).getUint8(0, true) !== 0xeb) {
+        throw new Error(`Relapse kpatch site +0x${site.toString(16)} was not patched !!`);
+      }
     }
   }
 

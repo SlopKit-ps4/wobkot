@@ -2,7 +2,7 @@
 
 Updated userland to use newer JSC bugs.
 
-PS4 13.00 also has a kernel stage (`src/netctrl.js`, a NetControl UAF port) and the matching payload is bundled at `src/ps4/payload.bin`.
+PS4 13.00 also has a Relapse (poops/AIO UAF) kernel stage at `src/ps4/relapse.js`, and the matching payload is bundled at `src/ps4/payload.bin`.
 
 # How to use
 
