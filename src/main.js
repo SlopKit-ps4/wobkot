@@ -1,15 +1,4 @@
-globalThis.BUILD_ID = '20261126a';
-
-// Mirror every log line to the host so it can be copied from the terminal.
-function post_log(line) {
-  try {
-    fetch('/log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: `${line}\n`,
-    }).catch(() => {});
-  } catch (e) {}
-}
+globalThis.BUILD_ID = '20261125a';
 
 const logger = {
   verbose: true, // enable for debug logs
@@ -27,13 +16,9 @@ const logger = {
     if (this.verbose) this.log('[*]', `${msg}`);
   },
   log(prefix, msg) {
-    const line = `${prefix} ${String(msg).replace(/\n/g, `\n${prefix} `)}`;
-
-    post_log(line);
-
     if (!this.console) return;
 
-    this.console.append(`${line}\n`);
+    this.console.append(`${prefix} ${String(msg).replace(/\n/g, `\n${prefix} `)}\n`);
     this.console.scrollTop = this.console.scrollHeight;
   },
 };
